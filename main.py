@@ -3,17 +3,101 @@ import sys
 import pyotp
 from bs4 import BeautifulSoup
 import logging
+import datetime
+import pytz
+import icalendar
+import uuid
 
 import os
 from dotenv import load_dotenv
 
 # https://www.w3.org/TR/webauthn-2
 
-load_dotenv()
+tz = pytz.timezone("America/Toronto")
+calendar = icalendar.Calendar()
 
+# Product Identifier https://www.kanzaki.com/docs/ical/prodid.html
+calendar.add("PRODID", "Cineplex timetable to .ics")
+calendar.add("VERSION", "2.0") # iCalendar spec version
+
+# TODO: Document this better
+# Create timezone for America/Toronto
+timezone = icalendar.Timezone()
+timezone.add('TZID', 'America/Toronto')
+
+# TODO: Use pytz timezone to get this information?
+# EDT timezone info
+daylight_timezone = icalendar.TimezoneDaylight()
+daylight_timezone.add('TZOFFSETFROM', datetime.timedelta(hours=-5))
+daylight_timezone.add('TZOFFSETTO', datetime.timedelta(hours=-4))
+daylight_timezone.add('TZNAME', 'EDT')
+daylight_timezone.add('DTSTART', datetime.datetime(1970, 3, 8))
+daylight_timezone.add('RRULE', {'FREQ': 'YEARLY', 'BYMONTH': 3, 'BYDAY': '2SU'})
+
+# EST timezone info
+standard_timezone = icalendar.TimezoneStandard()
+standard_timezone.add('TZOFFSETFROM', datetime.timedelta(hours=-4))
+standard_timezone.add('TZOFFSETTO', datetime.timedelta(hours=-5))
+standard_timezone.add('TZNAME', 'EST')
+standard_timezone.add('DTSTART', datetime.datetime(1970, 11, 1))
+standard_timezone.add('RRULE', {'FREQ': 'YEARLY', 'BYMONTH': 11, 'BYDAY': '1SU'})
+
+# Combine
+timezone.add_component(daylight_timezone)
+timezone.add_component(standard_timezone)
+calendar.add_component(timezone)
+
+# Get secrets
+load_dotenv()
 username = os.environ["CINEPLEX_USERNAME"]
 password = os.environ["CINEPLEX_PASSWORD"]
 totp_secret = os.environ["CINEPLEX_TOTP_SECRET"]
+
+def getShift(session: requests.Session, date: datetime.date):
+    '''Get details about shift for a given date, user must be logged in'''
+    # Convert date to mm.dd.yyyy
+    date_str = date.strftime("%m.%d.%Y")
+
+    # Form request url
+    url = f"https://workbrain.cineplex.com/etm/time/timesheet/etmTnsDay.jsp?date={date_str}"
+
+    # Send GET request
+    response = session.get(url)
+
+    # Parse start and end time
+    soup = BeautifulSoup(response.text, "html.parser")
+
+    # Get date container
+    td = soup.find("td", class_ = "currentDay")
+    # Get date shift times as strings hh:mm - hh:mm
+    try:
+        times = td.find("div", class_ = "calendarTextShiftTime").getText().split("-")
+    except AttributeError:
+        print("No shift")
+        return
+
+    # Get shift start and end time
+    start_time = datetime.datetime.strptime(times[0].strip(), "%H:%M").time()
+    end_time = datetime.datetime.strptime(times[1].strip(), "%H:%M").time()
+
+    # Create calendar date info
+    dtstart = datetime.datetime.combine(date, start_time, tzinfo=tz)
+    dtend = datetime.datetime.combine(date, end_time, tzinfo=tz)
+    dtstamp = datetime.datetime.now(tz=tz)
+
+    # Create iCalendar event
+    event = icalendar.Event()
+    event.add('SUMMARY', "Cineplex Shift")
+    event.add('DTSTART', dtstart)
+    event.add('DTEND', dtend)
+    event.add('DTSTAMP', dtstamp)
+    event.add('UID', uuid.uuid4())
+
+    calendar.add_component(event)
+
+
+
+
 
 def main():
     session = requests.Session()
@@ -24,12 +108,12 @@ def main():
     # Returns JSON on success, XML on failure
     response = session.post(
         "https://wd3.myworkday.com/wday/authgwy/cineplex/login-auth.xml",
-        headers = {"Content-Type": "application/x-www-form-urlencoded"},
         data = {"userName": username, "password": password}
     )
 
     json = response.json()
     token = json["sessionSecureToken"]
+    print(json)
 
     # errorMessage: "You entered an incorrect code. Please try again."
     # status: "MFA_CHALLENGE"
@@ -37,7 +121,6 @@ def main():
     response = session.post(
         "https://wd3.myworkday.com/wday/authgwy/cineplex/api/authn/mfa/challenge/workday/totp",
         headers = {
-            "Content-Type": "application/json",
             "Session-Secure-Token": token,
         },
         json = {"passcode": pyotp.TOTP(totp_secret).now()}
@@ -49,13 +132,23 @@ def main():
 
     # Since Javascript is not supported, parse and submit the form
     inputs = {}
-    inputs.update({"RelayState": soup.find_all("input")[0]["value"]})
-    inputs.update({"SAMLResponse": soup.find_all("input")[1]["value"]})
-    print(inputs)
+    for element in soup.find_all("input"):
+        key = element["name"]
+        value = element["value"]
+        inputs.update({key: value})
 
-    response = session.post("https://workbrain.cineplex.com/samlsso", headers={"Content-Type": "application/x-www-form-urlencoded"}, data=inputs)
-    response = session.get("https://workbrain.cineplex.com/etm/time/timesheet/etmTnsMonth.jsp?selectedTocID=181&parentID=10")
-    print(response.text)
+    if len(inputs) < 1:
+        raise "SSO Failed, this happens often, retry a few times"
+
+    print(inputs)
+    response = session.post("https://workbrain.cineplex.com/samlsso", data=inputs)
+
+    for i in range(0, 7):
+        getShift(session, datetime.datetime.now(tz=tz).date() + datetime.timedelta(days=i))
+
+    with open("output.ics", "wb") as file:
+        file.write(calendar.to_ical())
+        print("Calendar written")
 
 # https://docs.python.org/3/library/__main__.html
 if __name__ == "__main__":
