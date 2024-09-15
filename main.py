@@ -7,6 +7,7 @@ import datetime
 import pytz
 import icalendar
 import uuid
+from json import JSONDecodeError
 
 import os
 from dotenv import load_dotenv
@@ -55,6 +56,7 @@ totp_secret = os.environ["CINEPLEX_TOTP_SECRET"]
 
 def getShift(session: requests.Session, date: datetime.date):
     '''Get details about shift for a given date, user must be logged in'''
+
     # Convert date to mm.dd.yyyy
     date_str = date.strftime("%m.%d.%Y")
 
@@ -95,40 +97,51 @@ def getShift(session: requests.Session, date: datetime.date):
 
     calendar.add_component(event)
 
-
-
-
-
-def main():
-    session = requests.Session()
-    session.headers.update({
-        "X-Workday-Client": "2024.37.11"
-    })
+def login(session: requests.Session, username: str, password: str, totp_secret: str):
+    """Login to Workday and Workbrain"""
 
     # Returns JSON on success, XML on failure
-    response = session.post(
-        "https://wd3.myworkday.com/wday/authgwy/cineplex/login-auth.xml",
+    response = session.post("https://wd3.myworkday.com/wday/authgwy/cineplex/login-auth.xml",
         data = {"userName": username, "password": password}
     )
+    
+    try:
+        json = response.json()
+        result = json["result"]
+        # TODO: Respond to errors
+        if result != "SUCCESS":
+            err_message = json["errorMessage"]
+            raise RuntimeError(f"Workday login failed: {err_message}")
+        token = json["sessionSecureToken"]
+    except JSONDecodeError as err:
+        raise RuntimeError("Workday login returned non-json response", err)
 
-    json = response.json()
-    token = json["sessionSecureToken"]
-    print(json)
+    totp = pyotp.TOTP(totp_secret)
 
     # errorMessage: "You entered an incorrect code. Please try again."
     # status: "MFA_CHALLENGE"
     # result: "FAILURE"
-    response = session.post(
-        "https://wd3.myworkday.com/wday/authgwy/cineplex/api/authn/mfa/challenge/workday/totp",
-        headers = {
-            "Session-Secure-Token": token,
-        },
-        json = {"passcode": pyotp.TOTP(totp_secret).now()}
+
+    # Error that happens when running too often
+    # errorMessage: "Your session has expired, please re-enter your password"
+    response = session.post("https://wd3.myworkday.com/wday/authgwy/cineplex/api/authn/mfa/challenge/workday/totp",
+        headers = {"Session-Secure-Token": token},
+        json = {"passcode": totp.now()} # Could fail if request takes too long?
     )
 
+    try:
+        json = response.json()
+        result = json["result"]
+        # TODO: Respond to errors
+        if result != "SUCCESS":
+            err_message = json["errorMessage"]
+            raise RuntimeError(f"Workday MFA failed: {err_message}")
+    except JSONDecodeError as err:
+        raise RuntimeError("Workday MFA TOTP returned non-json response", err)
+
+    # SSO into Workbrain
     response = session.get("https://wd3.myworkday.com/cineplex/samlsso/autosubmit/6503$1.htmld")
     soup = BeautifulSoup(response.text, "html.parser")
-    print(soup.prettify())
 
     # Since Javascript is not supported, parse and submit the form
     inputs = {}
@@ -138,10 +151,23 @@ def main():
         inputs.update({key: value})
 
     if len(inputs) < 1:
-        raise "SSO Failed, this happens often, retry a few times"
+        raise RuntimeError("SSO Failed, this happens often, retry a few times")
 
-    print(inputs)
+    # TODO: Handle any errors from this request
     response = session.post("https://workbrain.cineplex.com/samlsso", data=inputs)
+
+    
+
+
+
+def main():
+    session = requests.Session()
+    session.headers.update({
+        "X-Workday-Client": "2024.37.11"
+    })
+
+    # Login to Workday and Workbrain
+    login(session, username, password, totp_secret)
 
     for i in range(0, 7):
         getShift(session, datetime.datetime.now(tz=tz).date() + datetime.timedelta(days=i))
