@@ -29,7 +29,10 @@ class Cineplex:
                 raise RuntimeError(f"Workday login failed: {err_message}")
             token = json["sessionSecureToken"]
         except JSONDecodeError as err:
-            raise RuntimeError("Workday login returned non-json response", err)
+            soup = BeautifulSoup(response.text, "xml")
+            reason = soup.find("wul:Failure")["Reason"]
+            message = soup.find("wul:Failure").get_text()
+            raise RuntimeError("Workday login returned non-json response", reason, message)
 
         totp = pyotp.TOTP(totp_secret)
 
