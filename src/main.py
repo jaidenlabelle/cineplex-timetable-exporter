@@ -79,7 +79,7 @@ class Cineplex:
             inputs.update({key: value})
 
         if len(inputs) < 1:
-            raise RuntimeError("SSO Failed, this happens often, retry a few times")
+            raise RuntimeError("SSO Failed")
 
         # TODO: Handle any errors from this request
         response = self.session.post("https://workbrain.cineplex.com/samlsso", data=inputs)
@@ -122,33 +122,6 @@ class ShiftCalendar:
         # Product Identifier https://www.kanzaki.com/docs/ical/prodid.html
         self.calendar.add("PRODID", "Algonquin timetable to .ics")
         self.calendar.add("VERSION", "2.0") # iCalendar spec version
-
-        # TODO: Document this better
-        # Create timezone for America/Toronto
-        timezone = icalendar.Timezone()
-        timezone.add('TZID', 'America/Toronto')
-        
-        # TODO: Use pytz timezone to get this information?
-        # EDT timezone info
-        daylight_timezone = icalendar.TimezoneDaylight()
-        daylight_timezone.add('TZOFFSETFROM', datetime.timedelta(hours=-5))
-        daylight_timezone.add('TZOFFSETTO', datetime.timedelta(hours=-4))
-        daylight_timezone.add('TZNAME', 'EDT')
-        daylight_timezone.add('DTSTART', datetime.datetime(1970, 3, 8))
-        daylight_timezone.add('RRULE', {'FREQ': 'YEARLY', 'BYMONTH': 3, 'BYDAY': '2SU'})
-
-        # EST timezone info
-        standard_timezone = icalendar.TimezoneStandard()
-        standard_timezone.add('TZOFFSETFROM', datetime.timedelta(hours=-4))
-        standard_timezone.add('TZOFFSETTO', datetime.timedelta(hours=-5))
-        standard_timezone.add('TZNAME', 'EST')
-        standard_timezone.add('DTSTART', datetime.datetime(1970, 11, 1))
-        standard_timezone.add('RRULE', {'FREQ': 'YEARLY', 'BYMONTH': 11, 'BYDAY': '1SU'})
-
-        # Combine
-        timezone.add_component(daylight_timezone)
-        timezone.add_component(standard_timezone)
-        self.calendar.add_component(timezone)
 
     def add_shift(self, date: datetime.date, start_time: datetime.time, end_time: datetime.time):
         """Add shift to calendar"""
