@@ -1,5 +1,5 @@
 import pytest
-from ..cineplex import Cineplex
+from cineplex.cineplex import Cineplex
 import os
 from dotenv import load_dotenv
 import datetime
