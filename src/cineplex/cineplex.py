@@ -3,12 +3,9 @@ from datetime import datetime, date
 from json import JSONDecodeError
 from bs4 import BeautifulSoup
 from pyotp import TOTP
+from cineplex.shift import Shift
 
-# class Shift:
-#     """A class that represents a shift at work"""
-#     def __init__(self, start: datetime, end: datetime) -> None:
-#         self.start = start
-#         self.end = end
+
 class Cineplex:
     """A class to interact with the Cineplex Workday/Workbrain API"""
     def __init__(self) -> None:
