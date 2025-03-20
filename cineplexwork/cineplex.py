@@ -3,7 +3,7 @@ from datetime import datetime, date
 from json import JSONDecodeError
 from bs4 import BeautifulSoup
 from pyotp import TOTP
-from cineplex.shift import Shift
+from cineplexwork.shift import Shift
 
 
 class Cineplex:
@@ -92,4 +92,8 @@ class Cineplex:
         start_time = datetime.strptime(times[0].strip(), "%H:%M").time()
         end_time = datetime.strptime(times[1].strip(), "%H:%M").time()
 
-        return (start_time, end_time)
+        # Add date to times
+        start_time = datetime.combine(date, start_time)
+        end_time = datetime.combine(date, end_time)
+
+        return Shift(start_time, end_time)
