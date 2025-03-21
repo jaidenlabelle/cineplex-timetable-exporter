@@ -24,7 +24,7 @@ Example Docker compose setup when using the official Docker image.
 ```yaml
 services:
   cineplexwork:
-    image: 'jaidenlabelle/cineplex:latest'
+    image: 'jaidenlabelle/cineplexwork:latest'
     container_name: cineplexwork
     restart: no # Avoid restart loop if something bad happens (recommended)
     environment:
